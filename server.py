@@ -1,16 +1,19 @@
+# импортируем библиотеки
 from flask import Flask, request
 import logging
+
 import json
-from geo import get_country, get_distance, get_coordinates
 
 app = Flask(__name__)
 
-logging.basicConfig(level=logging.INFO, filename='app.log', format='%(asctime)s %(levelname)s %(name)s %(message)s')
+logging.basicConfig(level=logging.INFO)
+
+sessionStorage = {}
+
 
 @app.route('/post', methods=['POST'])
 def main():
-
-    logging.info('Request: %r', request.json)
+    logging.info(f'Request: {request.json!r}')
 
     response = {
         'session': request.json['session'],
@@ -20,55 +23,65 @@ def main():
         }
     }
 
-    handle_dialog(response, request.json)
+    handle_dialog(request.json, response)
 
-    logging.info('Request: %r', response)
+    logging.info(f'Response:  {response!r}')
 
     return json.dumps(response)
 
 
-def handle_dialog(res, req):
-
+def handle_dialog(req, res):
     user_id = req['session']['user_id']
 
     if req['session']['new']:
-
-        res['response']['text'] = 'Привет! Я могу сказать в какой стране город или сказать расстояние между городами!'
-
+        sessionStorage[user_id] = {
+            'suggests': [
+                "Не хочу.",
+                "Не буду.",
+                "Отстань!",
+            ]
+        }
+        res['response']['text'] = 'Привет! Купи слона!'
+        res['response']['buttons'] = get_suggests(user_id)
         return
 
-    cities = get_cities(req)
+    if req['request']['original_utterance'].lower() in [
+        'ладно',
+        'куплю',
+        'покупаю',
+        'хорошо',
+        'Я покупаю',
+        'Я куплю'
+    ]:
+        res['response']['text'] = 'Слона можно найти на Яндекс.Маркете!'
+        res['response']['end_session'] = True
+        return
 
-    if len(cities) == 0:
-
-        res['response']['text'] = 'Ты не написал название не одного города!'
-
-    elif len(cities) == 1:
-
-        res['response']['text'] = 'Этот город в стране - ' + get_country(cities[0])
-
-    elif len(cities) == 2:
-
-        distance = get_distance(get_coordinates(cities[0]), get_coordinates(cities[1]))
-        res['response']['text'] = 'Расстояние между этими городами: ' + str(round(distance)) + ' км.'
-
-    else:
-
-        res['response']['text'] = 'Слишком много городов!'
+    res['response']['text'] = \
+        f"Все говорят '{req['request']['original_utterance']}', а ты купи слона!"
+    res['response']['buttons'] = get_suggests(user_id)
 
 
-def get_cities(req):
+def get_suggests(user_id):
+    session = sessionStorage[user_id]
 
-    cities = []
+    suggests = [
+        {'title': suggest, 'hide': True}
+        for suggest in session['suggests'][:2]
+    ]
 
-    for entity in req['request']['nlu']['entities']:
+    session['suggests'] = session['suggests'][1:]
+    sessionStorage[user_id] = session
 
-        if entity['type'] == 'YANDEX.GEO':
+    if len(suggests) < 2:
+        suggests.append({
+            "title": "Ладно",
+            "url": "https://market.yandex.ru/search?text=слон",
+            "hide": True
+        })
 
-            if 'city' in entity['value'].keys():
-                cities.append(entity['value']['city'])
+    return suggests
 
-    return cities
 
 if __name__ == '__main__':
     app.run()
